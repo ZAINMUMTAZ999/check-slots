@@ -8,9 +8,13 @@ export async function GET(request: Request) {
   const secret = searchParams.get('secret');
   const token = searchParams.get('token');
 
-  // Explicitly check against ADMIN_SECRET_KEY
+  // Print debug info if unauthorized so you can see what failed
   if (secret !== process.env.ADMIN_SECRET_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ 
+      error: 'Unauthorized', 
+      debugExpected: process.env.ADMIN_SECRET_KEY ? 'exists' : 'missing',
+      debugReceived: secret 
+    }, { status: 401 });
   }
 
   if (!token) {
