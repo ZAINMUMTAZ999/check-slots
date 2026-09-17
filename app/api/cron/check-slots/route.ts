@@ -23,35 +23,50 @@ export async function GET(req: Request) {
       timeout: 10000,
     });
 
-    // 1. Remove hidden scripts, styles, and HTML tags to get pure, readable sentences
-    const currentText = response.data
+    const rawText = response.data
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
       .replace(/<[^>]*>?/gm, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-    
-    // We changed the key name so it doesn't conflict with the old hash
-    const stateKey = 'gvcw_public_news_text';
-    const previousText = await redis.get(stateKey);
 
-    // 2. CHECK FOR CRUD ACTIVITY (Using real text now)
-    if (previousText && previousText !== currentText) {
+    // THE MAGIC: Regex that precisely extracts only the Dates and Titles of the news articles
+    const newsRegex = /(\d{2}\/\d{2}\/\d{4})\s+(.*?)\s+READ ARTICLE/g;
+    const newsItems = [];
+    let match;
+    
+    while ((match = newsRegex.exec(rawText)) !== null) {
+      newsItems.push({
+        date: match[1],
+        title: match[2].trim()
+      });
+    }
+
+    const stateKey = 'gvcw_public_news_list';
+    
+    // Upstash SDK automatically parses saved JSON back into a JavaScript Array
+    const previousData = await redis.get(stateKey); 
+    
+    // Convert both to strings to check for exact changes
+    const previousString = previousData ? JSON.stringify(previousData) : null;
+    const currentString = JSON.stringify(newsItems);
+
+    if (previousString && previousString !== currentString) {
        await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
-         `⚠️ ADMIN ACTIVITY: GVCW News Page words were updated! Check the site.`, 
+         `⚠️ ADMIN ACTIVITY: GVCW News Page articles were updated!`, 
          { headers: { 'Priority': 'urgent', 'Tags': 'newspaper,loudspeaker' }}
        );
-    } else if (!previousText) {
+    } else if (!previousString) {
        await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
-         `🔄 DATABASE CRUD: News text was deleted from Redis and has been restored!`, 
+         `🔄 DATABASE CRUD: Structured news list was restored in Redis!`, 
          { headers: { 'Priority': 'high' }}
        );
     }
 
-    // 3. Save the readable text into Upstash so you can see it!
-    await redis.set(stateKey, currentText);
+    // Save the array directly. Upstash will format it beautifully!
+    await redis.set(stateKey, newsItems);
     
-    return NextResponse.json({ success: true, message: "Public page text checked and saved successfully!" });
+    return NextResponse.json({ success: true, message: "News list parsed and saved beautifully!" });
 
   } catch (error: any) {
     return NextResponse.json({ error: "Failed to check public site" }, { status: 500 });
