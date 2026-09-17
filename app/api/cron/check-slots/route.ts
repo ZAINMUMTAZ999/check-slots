@@ -8,7 +8,6 @@ const DATES_TO_CHECK = ["07/09/2026", "08/09/2026", "01/10/2026"];
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function GET(req: Request) {
-  // NEW: Security check for cron-job.org
   const { searchParams } = new URL(req.url);
   const secret = searchParams.get('secret');
   
@@ -19,8 +18,13 @@ export async function GET(req: Request) {
   let slotsFound = false;
   const token = await redis.get('gvcw_bearer_token');
 
-if (!token) {
-    return NextResponse.json({ status: "No token found, skipping check." }, { status: 200 });
+  // ALERTS YOU IF YOU DELETE THE TOKEN FROM REDIS
+  if (!token) {
+    await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
+      `🚨 DATABASE ERROR: No GVCW token found in Redis! Token was deleted or missing.`, 
+      { headers: { 'Priority': 'urgent' }}
+    );
+    return NextResponse.json({ error: "Missing token alert sent" }, { status: 400 });
   }
 
   for (let i = 0; i < DATES_TO_CHECK.length; i++) {
@@ -48,6 +52,7 @@ if (!token) {
       const stateKey = `gvcw_data_state_${date.replace(/\//g, '')}`;
       const previousDataString = await redis.get(stateKey);
 
+      // ALERTS YOU IF ANY BACKEND DATA/CRUD CHANGES HAPPEN
       if (previousDataString && previousDataString !== currentDataString) {
          await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
            `⚠️ ADMIN ACTIVITY: Backend data changed for ${date}!`, 
@@ -69,7 +74,6 @@ if (!token) {
       }
     } catch (error: any) {
       if (error.response && error.response.status === 401) {
-        console.error("Token Expired! 401 Unauthorized.");
         const expCache = await redis.get('token_exp_alerted');
         if (!expCache) {
            await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
