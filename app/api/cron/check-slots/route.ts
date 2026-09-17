@@ -2,9 +2,29 @@ import { NextResponse } from 'next/server';
 import { Redis } from '@upstash/redis';
 import axios from 'axios';
 
+// Allows Vercel to run longer so it can check many dates without timing out
+export const maxDuration = 60; 
+
 const redis = Redis.fromEnv();
 const NTFY_TOPIC = 'zain_gvcw_secure_alert_99';
-const DATES_TO_CHECK = ["07/09/2026", "08/09/2026", "01/10/2026"]; 
+
+// NEW: Automatically generates the next 14 days from today's date
+function getDynamicDates(daysAhead: number) {
+  const dates = [];
+  const today = new Date();
+  for (let i = 0; i < daysAhead; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    dates.push(`${day}/${month}/${year}`);
+  }
+  return dates;
+}
+
+// Set to check the next 14 days automatically. You can change this number.
+const DATES_TO_CHECK = getDynamicDates(14); 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function GET(req: Request) {
@@ -26,11 +46,10 @@ export async function GET(req: Request) {
         `🚨 DATABASE ERROR: No GVCW token found in Redis! Token was deleted.`, 
         { headers: { 'Priority': 'urgent' }}
       );
-      await redis.setex('missing_token_alerted', 86400, "true"); // Prevents spamming every minute
+      await redis.setex('missing_token_alerted', 86400, "true"); 
     }
     return NextResponse.json({ error: "Missing token" }, { status: 400 });
   } else {
-    // If token exists, clear the missing alert lock so it can alert again if deleted later
     await redis.del('missing_token_alerted');
   }
 
@@ -93,8 +112,8 @@ export async function GET(req: Request) {
       }
     }
 
-    if (i < DATES_TO_CHECK.length - 1) await sleep(2500); 
+    if (i < DATES_TO_CHECK.length - 1) await sleep(1500); // Slightly faster sleep to handle more dates
   }
 
-  return NextResponse.json({ success: true, slotsFound });
+  return NextResponse.json({ success: true, slotsFound, datesChecked: DATES_TO_CHECK });
 }
