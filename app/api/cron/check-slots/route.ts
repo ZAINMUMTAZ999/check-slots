@@ -3,6 +3,9 @@ import { Redis } from '@upstash/redis';
 import axios from 'axios';
 import crypto from 'crypto';
 
+// THE MAGIC FIX: Forces Vercel to actually run the code every single time instead of using memory!
+export const dynamic = 'force-dynamic';
+
 const redis = Redis.fromEnv();
 const NTFY_TOPIC = 'zain_gvcw_secure_alert_99';
 
@@ -15,7 +18,6 @@ export async function GET(req: Request) {
   }
 
   try {
-    // Fetch the PUBLIC News page directly (No token required!)
     const response = await axios.get('https://pk-gr.gvcworld.eu/en/news', {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'
@@ -29,7 +31,6 @@ export async function GET(req: Request) {
     const stateKey = 'gvcw_public_news_state';
     const previousHash = await redis.get(stateKey);
 
-    // CHECK FOR CRUD ACTIVITY (CMS Admin or Developer)
     if (previousHash && previousHash !== currentHash) {
        await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
          `⚠️ ADMIN ACTIVITY: GVCW News Page was updated! Check the site.`, 
@@ -43,7 +44,7 @@ export async function GET(req: Request) {
     }
 
     await redis.set(stateKey, currentHash);
-    return NextResponse.json({ success: true, message: "Public page checked successfully without tokens." });
+    return NextResponse.json({ success: true, message: "Public page checked and saved successfully!" });
 
   } catch (error: any) {
     return NextResponse.json({ error: "Failed to check public site" }, { status: 500 });
