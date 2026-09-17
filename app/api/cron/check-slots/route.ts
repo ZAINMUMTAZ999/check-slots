@@ -19,13 +19,8 @@ export async function GET(req: Request) {
   let slotsFound = false;
   const token = await redis.get('gvcw_bearer_token');
 
-  if (!token) {
-    console.error("No GVCW token found in Redis!");
-    await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
-      `🚨 DATABASE ERROR: No GVCW token found in Redis!`, 
-      { headers: { 'Priority': 'urgent' }}
-    );
-    return NextResponse.json({ error: "Missing token" }, { status: 400 });
+if (!token) {
+    return NextResponse.json({ status: "No token found, skipping check." }, { status: 200 });
   }
 
   for (let i = 0; i < DATES_TO_CHECK.length; i++) {
