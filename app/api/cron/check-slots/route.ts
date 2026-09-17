@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
 import { Redis } from '@upstash/redis';
 import axios from 'axios';
-import crypto from 'crypto';
 
-// THE MAGIC FIX: Forces Vercel to actually run the code every single time instead of using memory!
 export const dynamic = 'force-dynamic';
 
 const redis = Redis.fromEnv();
@@ -25,26 +23,35 @@ export async function GET(req: Request) {
       timeout: 10000,
     });
 
-    const currentWebpageData = response.data;
-    const currentHash = crypto.createHash('sha256').update(currentWebpageData).digest('hex');
+    // 1. Remove hidden scripts, styles, and HTML tags to get pure, readable sentences
+    const currentText = response.data
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<[^>]*>?/gm, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     
-    const stateKey = 'gvcw_public_news_state';
-    const previousHash = await redis.get(stateKey);
+    // We changed the key name so it doesn't conflict with the old hash
+    const stateKey = 'gvcw_public_news_text';
+    const previousText = await redis.get(stateKey);
 
-    if (previousHash && previousHash !== currentHash) {
+    // 2. CHECK FOR CRUD ACTIVITY (Using real text now)
+    if (previousText && previousText !== currentText) {
        await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
-         `⚠️ ADMIN ACTIVITY: GVCW News Page was updated! Check the site.`, 
+         `⚠️ ADMIN ACTIVITY: GVCW News Page words were updated! Check the site.`, 
          { headers: { 'Priority': 'urgent', 'Tags': 'newspaper,loudspeaker' }}
        );
-    } else if (!previousHash) {
+    } else if (!previousText) {
        await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
-         `🔄 DATABASE CRUD: News state was deleted from Redis and has been restored!`, 
+         `🔄 DATABASE CRUD: News text was deleted from Redis and has been restored!`, 
          { headers: { 'Priority': 'high' }}
        );
     }
 
-    await redis.set(stateKey, currentHash);
-    return NextResponse.json({ success: true, message: "Public page checked and saved successfully!" });
+    // 3. Save the readable text into Upstash so you can see it!
+    await redis.set(stateKey, currentText);
+    
+    return NextResponse.json({ success: true, message: "Public page text checked and saved successfully!" });
 
   } catch (error: any) {
     return NextResponse.json({ error: "Failed to check public site" }, { status: 500 });
