@@ -1,23 +1,30 @@
-
-
 import { NextResponse } from 'next/server';
-import { verifySignatureAppRouter } from '@upstash/qstash/nextjs';
 import { Redis } from '@upstash/redis';
 import axios from 'axios';
 
 const redis = Redis.fromEnv();
 const NTFY_TOPIC = 'zain_gvcw_secure_alert_99';
-const DATES_TO_CHECK = ["09/16/2026", "10/01/2026"];
+const DATES_TO_CHECK = ["07/09/2026", "08/09/2026", "01/10/2026"]; 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export const POST = verifySignatureAppRouter(async (req: Request) => {
-  let slotsFound = false;
+export async function GET(req: Request) {
+  // NEW: Security check for cron-job.org
+  const { searchParams } = new URL(req.url);
+  const secret = searchParams.get('secret');
+  
+  if (secret !== process.env.ADMIN_SECRET_KEY) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
-  // 1. Fetch the active token from Redis instead of process.env
-  const token = await redis.get('gvcw_active_token');
+  let slotsFound = false;
+  const token = await redis.get('gvcw_bearer_token');
 
   if (!token) {
     console.error("No GVCW token found in Redis!");
+    await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
+      `🚨 DATABASE ERROR: No GVCW token found in Redis!`, 
+      { headers: { 'Priority': 'urgent' }}
+    );
     return NextResponse.json({ error: "Missing token" }, { status: 400 });
   }
 
@@ -35,13 +42,25 @@ export const POST = verifySignatureAppRouter(async (req: Request) => {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`, 
+          'Cookie': `${token}`, 
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'
         },
         timeout: 10000,
       });
 
       const slots = response.data; 
+      const currentDataString = JSON.stringify(slots);
+      const stateKey = `gvcw_data_state_${date.replace(/\//g, '')}`;
+      const previousDataString = await redis.get(stateKey);
+
+      if (previousDataString && previousDataString !== currentDataString) {
+         await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
+           `⚠️ ADMIN ACTIVITY: Backend data changed for ${date}!`, 
+           { headers: { 'Priority': 'high' }}
+         );
+      }
+
+      await redis.set(stateKey, currentDataString);
 
       if (slots && slots.length > 0) {
         slotsFound = true;
@@ -55,19 +74,16 @@ export const POST = verifySignatureAppRouter(async (req: Request) => {
       }
     } catch (error: any) {
       if (error.response && error.response.status === 401) {
-        // 2. THE TOKEN EXPIRED! Alert your phone immediately
         console.error("Token Expired! 401 Unauthorized.");
-        
-        // Prevent spamming the expiration alert every 3 minutes
         const expCache = await redis.get('token_exp_alerted');
         if (!expCache) {
            await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
-             `⚠️ GVCW Worker Stopped! Your session token expired (401). Please update the token in Redis.`, 
+             `⚠️ GVCW Worker Stopped! Your session token expired (401).`, 
              { headers: { 'Title': 'TOKEN EXPIRED', 'Priority': 'high' }}
            );
-           await redis.setex('token_exp_alerted', 1800, "true"); // Silence alert for 30 mins
+           await redis.setex('token_exp_alerted', 1800, "true"); 
         }
-        break; // Stop checking the other dates if the token is dead
+        break; 
       }
     }
 
@@ -75,4 +91,4 @@ export const POST = verifySignatureAppRouter(async (req: Request) => {
   }
 
   return NextResponse.json({ success: true, slotsFound });
-});
+}
