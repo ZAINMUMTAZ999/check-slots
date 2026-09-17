@@ -30,43 +30,37 @@ export async function GET(req: Request) {
       .replace(/\s+/g, ' ')
       .trim();
 
-    // THE MAGIC: Regex that precisely extracts only the Dates and Titles of the news articles
     const newsRegex = /(\d{2}\/\d{2}\/\d{4})\s+(.*?)\s+READ ARTICLE/g;
-    const newsItems = [];
+    
+    // Build the exact UI layout matching the website image
+    let formattedWebpageLayout = "News\n\n";
     let match;
     
     while ((match = newsRegex.exec(rawText)) !== null) {
-      newsItems.push({
-        date: match[1],
-        title: match[2].trim()
-      });
+      // Recreates the visual gaps and the horizontal divider line
+      formattedWebpageLayout += `${match[1]}\n\n${match[2].trim()}\n\nREAD ARTICLE\n\n─────────────────────────────────────────────────────────\n\n`;
     }
 
-    const stateKey = 'gvcw_public_news_list';
-    
-    // Upstash SDK automatically parses saved JSON back into a JavaScript Array
-    const previousData = await redis.get(stateKey); 
-    
-    // Convert both to strings to check for exact changes
-    const previousString = previousData ? JSON.stringify(previousData) : null;
-    const currentString = JSON.stringify(newsItems);
+    const stateKey = 'gvcw_public_news_layout';
+    const previousLayout = await redis.get(stateKey); 
 
-    if (previousString && previousString !== currentString) {
+    // Check for exact text changes in this visual layout
+    if (previousLayout && previousLayout !== formattedWebpageLayout) {
        await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
          `⚠️ ADMIN ACTIVITY: GVCW News Page articles were updated!`, 
          { headers: { 'Priority': 'urgent', 'Tags': 'newspaper,loudspeaker' }}
        );
-    } else if (!previousString) {
+    } else if (!previousLayout) {
        await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
-         `🔄 DATABASE CRUD: Structured news list was restored in Redis!`, 
+         `🔄 DATABASE CRUD: Visual news layout was restored in Redis!`, 
          { headers: { 'Priority': 'high' }}
        );
     }
 
-    // Save the array directly. Upstash will format it beautifully!
-    await redis.set(stateKey, newsItems);
+    // Save the raw text block. Upstash will render the line breaks natively.
+    await redis.set(stateKey, formattedWebpageLayout);
     
-    return NextResponse.json({ success: true, message: "News list parsed and saved beautifully!" });
+    return NextResponse.json({ success: true, message: "News layout parsed and saved to match the website!" });
 
   } catch (error: any) {
     return NextResponse.json({ error: "Failed to check public site" }, { status: 500 });
