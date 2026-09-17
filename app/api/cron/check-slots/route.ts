@@ -18,13 +18,20 @@ export async function GET(req: Request) {
   let slotsFound = false;
   const token = await redis.get('gvcw_bearer_token');
 
-  // ALERTS YOU IF YOU DELETE THE TOKEN FROM REDIS
+  // IF TOKEN IS DELETED: Rings your phone ONCE, then stays quiet until you fix it
   if (!token) {
-    await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
-      `🚨 DATABASE ERROR: No GVCW token found in Redis! Token was deleted or missing.`, 
-      { headers: { 'Priority': 'urgent' }}
-    );
-    return NextResponse.json({ error: "Missing token alert sent" }, { status: 400 });
+    const missingAlerted = await redis.get('missing_token_alerted');
+    if (!missingAlerted) {
+      await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
+        `🚨 DATABASE ERROR: No GVCW token found in Redis! Token was deleted.`, 
+        { headers: { 'Priority': 'urgent' }}
+      );
+      await redis.setex('missing_token_alerted', 86400, "true"); // Prevents spamming every minute
+    }
+    return NextResponse.json({ error: "Missing token" }, { status: 400 });
+  } else {
+    // If token exists, clear the missing alert lock so it can alert again if deleted later
+    await redis.del('missing_token_alerted');
   }
 
   for (let i = 0; i < DATES_TO_CHECK.length; i++) {
@@ -52,7 +59,7 @@ export async function GET(req: Request) {
       const stateKey = `gvcw_data_state_${date.replace(/\//g, '')}`;
       const previousDataString = await redis.get(stateKey);
 
-      // ALERTS YOU IF ANY BACKEND DATA/CRUD CHANGES HAPPEN
+      // ALERTS YOU IF Gerry's CMS ADMIN MAKES ANY CHANGES/CRUD
       if (previousDataString && previousDataString !== currentDataString) {
          await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
            `⚠️ ADMIN ACTIVITY: Backend data changed for ${date}!`, 
