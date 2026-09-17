@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { verifySignatureAppRouter } from '@upstash/qstash/nextjs';
 import { Redis } from '@upstash/redis';
 import axios from 'axios';
 
@@ -8,15 +7,14 @@ const NTFY_TOPIC = 'zain_gvcw_secure_alert_99';
 const DATES_TO_CHECK = ["07/09/2026", "08/09/2026", "01/10/2026"]; 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export const POST = verifySignatureAppRouter(async (req: Request) => {
+// UNLOCKED CODE: cron-job.org can now successfully run this logic
+async function runSlotCheck() {
   let slotsFound = false;
 
-  // FIXED: Matches the exact key saved by the set-token route
   const token = await redis.get('gvcw_bearer_token');
 
   if (!token) {
     console.error("No GVCW token found in Redis!");
-    // FIXED: Rings your phone if the token is deleted/missing
     await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
       `🚨 DATABASE ERROR: No GVCW token found in Redis!`, 
       { headers: { 'Priority': 'urgent' }}
@@ -38,7 +36,6 @@ export const POST = verifySignatureAppRouter(async (req: Request) => {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
-          // FIXED: GVCW requires the token as a Cookie, not a Bearer token
           'Cookie': `${token}`, 
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'
         },
@@ -47,7 +44,6 @@ export const POST = verifySignatureAppRouter(async (req: Request) => {
 
       const slots = response.data; 
       
-      // NEW CRUD DETECTOR: Compare current raw data to previous raw data
       const currentDataString = JSON.stringify(slots);
       const stateKey = `gvcw_data_state_${date.replace(/\//g, '')}`;
       const previousDataString = await redis.get(stateKey);
@@ -91,7 +87,11 @@ export const POST = verifySignatureAppRouter(async (req: Request) => {
   }
 
   return NextResponse.json({ success: true, slotsFound });
-});
+}
+
+// Allows cron-job.org to trigger via GET or POST
+export async function GET() { return runSlotCheck(); }
+export async function POST() { return runSlotCheck(); }
 
 // import { NextResponse } from 'next/server';
 // import { verifySignatureAppRouter } from '@upstash/qstash/nextjs';
